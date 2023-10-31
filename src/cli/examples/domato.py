@@ -67,7 +67,7 @@ def upload_to_fuzzer_container(of: Onefuzz, fuzzer_name: str, fuzzer_url: str) -
 
 
 def upload_to_setup_container(of: Onefuzz, helper: JobHelper, setup_dir: str) -> None:
-    setup_sas = of.containers.get(helper.containers[ContainerType.setup]).sas_url
+    setup_sas = of.containers.get(helper.container_name(ContainerType.setup)).sas_url
     if AZCOPY_PATH is None:
         raise Exception("missing azcopy")
     command = [AZCOPY_PATH, "sync", setup_dir, setup_sas]
@@ -143,18 +143,22 @@ def main() -> None:
     helper.create_containers()
     helper.setup_notifications(notification_config)
     upload_to_setup_container(of, helper, args.setup_dir)
-    add_setup_script(of, helper.containers[ContainerType.setup])
+    add_setup_script(of, helper.container_name(ContainerType.setup))
 
     containers = [
-        (ContainerType.setup, helper.containers[ContainerType.setup]),
-        (ContainerType.crashes, helper.containers[ContainerType.crashes]),
-        (ContainerType.reports, helper.containers[ContainerType.reports]),
-        (ContainerType.unique_reports, helper.containers[ContainerType.unique_reports]),
+        (ContainerType.setup, helper.container_name(ContainerType.setup)),
+        (ContainerType.crashes, helper.container_name(ContainerType.crashes)),
+        (ContainerType.reports, helper.container_name(ContainerType.reports)),
+        (
+            ContainerType.unique_reports,
+            helper.container_name(ContainerType.unique_reports),
+        ),
     ]
 
     of.logger.info("Creating generic_crash_report task")
+    job = helper.create_job()
     of.tasks.create(
-        helper.job.job_id,
+        job.job_id,
         TaskType.generic_crash_report,
         helper.setup_relative_blob_name(args.target_exe, args.setup_dir),
         containers,
@@ -164,11 +168,11 @@ def main() -> None:
 
     containers = [
         (ContainerType.tools, Container(FUZZER_NAME)),
-        (ContainerType.setup, helper.containers[ContainerType.setup]),
-        (ContainerType.crashes, helper.containers[ContainerType.crashes]),
+        (ContainerType.setup, helper.container_name(ContainerType.setup)),
+        (ContainerType.crashes, helper.container_name(ContainerType.crashes)),
         (
             ContainerType.readonly_inputs,
-            helper.containers[ContainerType.readonly_inputs],
+            helper.container_name(ContainerType.readonly_inputs),
         ),
     ]
 
@@ -199,7 +203,7 @@ def main() -> None:
     ]
 
     of.tasks.create(
-        helper.job.job_id,
+        job.job_id,
         TaskType.generic_generator,
         helper.setup_relative_blob_name(args.target_exe, args.setup_dir),
         containers,

@@ -12,18 +12,19 @@ using Polly;
 namespace Microsoft.OneFuzz.Service;
 
 public interface IAdo {
-    public Async.Task<OneFuzzResultVoid> NotifyAdo(AdoTemplate config, Container container, IReport reportable, bool isLastRetryAttempt, Guid notificationId);
+    public Async.Task<OneFuzzResultVoid> NotifyAdo(AdoTemplate config, Container container, IReport reportable, Guid notificationId);
 }
 
 public class Ado : NotificationsBase, IAdo {
     // https://github.com/MicrosoftDocs/azure-devops-docs/issues/5890#issuecomment-539632059
     private const int MAX_SYSTEM_TITLE_LENGTH = 128;
     private const string TITLE_FIELD = "System.Title";
+    private static List<string> DEFAULT_REGRESSION_IGNORE_STATES = new() { "New", "Commited", "Active" };
 
     public Ado(ILogger<Ado> logTracer, IOnefuzzContext context) : base(logTracer, context) {
     }
 
-    public async Async.Task<OneFuzzResultVoid> NotifyAdo(AdoTemplate config, Container container, IReport reportable, bool isLastRetryAttempt, Guid notificationId) {
+    public async Async.Task<OneFuzzResultVoid> NotifyAdo(AdoTemplate config, Container container, IReport reportable, Guid notificationId) {
         var filename = reportable.FileName();
         Report? report;
         if (reportable is RegressionReport regressionReport) {
@@ -56,22 +57,29 @@ public class Ado : NotificationsBase, IAdo {
         _logTracer.LogEvent(adoEventType);
 
         try {
-            await ProcessNotification(_context, container, filename, config, report, _logTracer, notificationInfo);
+            await ProcessNotification(_context, container, filename, config, report, _logTracer, notificationInfo,
+                isRegression: reportable is RegressionReport);
         } catch (Exception e)
-              when (e is VssUnauthorizedException || e is VssAuthenticationException || e is VssServiceException) {
+            when (e is VssUnauthorizedException || e is VssAuthenticationException || e is VssServiceException) {
             if (config.AdoFields.TryGetValue("System.AssignedTo", out var assignedTo)) {
                 _logTracer.AddTag("assigned_to", assignedTo);
             }
 
-            if (!isLastRetryAttempt && IsTransient(e)) {
-                _logTracer.LogError("transient ADO notification failure {JobId} {TaskId} {Container} {Filename}", report.JobId, report.TaskId, container, filename);
-                throw;
+            if (IsTransient(e)) {
+                _logTracer.LogError("transient ADO notification failure {JobId} {TaskId} {Container} {Filename}",
+                    report.JobId, report.TaskId, container, filename);
+
+                return OneFuzzResultVoid.Error(ErrorCode.TRANSIENT_NOTIFICATION_FAILURE,
+                    $"Failed to process ado notification : exception: {e}");
             } else {
                 _logTracer.LogError(e, "Failed to process ado notification");
                 await LogFailedNotification(report, e, notificationId);
                 return OneFuzzResultVoid.Error(ErrorCode.NOTIFICATION_FAILURE,
                     $"Failed to process ado notification : exception: {e}");
             }
+        } catch (Exception e) {
+            return OneFuzzResultVoid.Error(ErrorCode.NOTIFICATION_FAILURE,
+                    $"Failed to process ado notification : exception: {e}");
         }
         return OneFuzzResultVoid.Ok;
     }
@@ -87,6 +95,105 @@ public class Ado : NotificationsBase, IAdo {
 
         var errorStr = e.ToString();
         return errorCodes.Any(errorStr.Contains);
+    }
+
+    public static OneFuzzResultVoid ValidateTreePath(IEnumerable<string> path, WorkItemClassificationNode? root) {
+        if (root is null) {
+            return OneFuzzResultVoid.Error(ErrorCode.ADO_VALIDATION_INVALID_PROJECT, new string[] {
+                $"Path \"{string.Join('\\', path)}\" is invalid. The specified ADO project doesn't exist.",
+                "Double check the 'project' field in your ADO config.",
+            });
+        }
+
+        string treeNodeTypeName;
+        switch (root.StructureType) {
+            case TreeNodeStructureType.Area:
+                treeNodeTypeName = "Area";
+                break;
+            case TreeNodeStructureType.Iteration:
+                treeNodeTypeName = "Iteration";
+                break;
+            default:
+                return OneFuzzResultVoid.Error(ErrorCode.ADO_VALIDATION_INVALID_PATH, new string[] {
+                    $"Path root \"{root.Name}\" is an unsupported type. Expected Area or Iteration but got {root.StructureType}.",
+                });
+        }
+
+        // Validate path based on
+        // https://learn.microsoft.com/en-us/azure/devops/organizations/settings/about-areas-iterations?view=azure-devops#naming-restrictions
+        var maxNodeLength = 255;
+        var maxDepth = 13;
+        // Invalid characters from the link above plus the escape sequences (since they have backslashes and produce confusingly formatted errors if not caught here)
+        var invalidChars = new char[] { '/', ':', '*', '?', '"', '<', '>', '|', ';', '#', '$', '*', '{', '}', ',', '+', '=', '[', ']' };
+
+        // Ensure that none of the path parts are too long
+        var erroneous = path.FirstOrDefault(part => part.Length > maxNodeLength);
+        if (erroneous != null) {
+            return OneFuzzResultVoid.Error(ErrorCode.ADO_VALIDATION_INVALID_PATH, new string[] {
+                $"{treeNodeTypeName} Path \"{string.Join('\\', path)}\" is invalid. \"{erroneous}\" is too long. It must be less than {maxNodeLength} characters.",
+                "Learn more about naming restrictions here: https://learn.microsoft.com/en-us/azure/devops/organizations/settings/about-areas-iterations?view=azure-devops#naming-restrictions"
+            });
+        }
+
+        // Ensure that none of the path parts contain invalid characters
+        erroneous = path.FirstOrDefault(part => invalidChars.Any(part.Contains));
+        if (erroneous != null) {
+            return OneFuzzResultVoid.Error(ErrorCode.ADO_VALIDATION_INVALID_PATH, new string[] {
+                $"{treeNodeTypeName} Path \"{string.Join('\\', path)}\" is invalid. \"{erroneous}\" contains an invalid character ({string.Join(" ", invalidChars)}).",
+                "Make sure that the path is separated by backslashes (\\) and not forward slashes (/).",
+                "Learn more about naming restrictions here: https://learn.microsoft.com/en-us/azure/devops/organizations/settings/about-areas-iterations?view=azure-devops#naming-restrictions"
+            });
+        }
+
+        // Ensure no unicode control characters
+        erroneous = path.FirstOrDefault(part => part.Any(ch => char.IsControl(ch)));
+        if (erroneous != null) {
+            return OneFuzzResultVoid.Error(ErrorCode.ADO_VALIDATION_INVALID_PATH, new string[] {
+                // More about control codes and their range here: https://en.wikipedia.org/wiki/Unicode_control_characters
+                $"{treeNodeTypeName} Path \"{string.Join('\\', path)}\" is invalid. \"{erroneous}\" contains a unicode control character (\\u0000 - \\u001F or \\u007F - \\u009F).",
+                "Make sure that you're path doesn't contain any escape characters (\\0 \\a \\b \\f \\n \\r \\t \\v).",
+                "Learn more about naming restrictions here: https://learn.microsoft.com/en-us/azure/devops/organizations/settings/about-areas-iterations?view=azure-devops#naming-restrictions"
+            });
+        }
+
+        // Ensure that there aren't too many path parts
+        if (path.Count() > maxDepth) {
+            return OneFuzzResultVoid.Error(ErrorCode.ADO_VALIDATION_INVALID_PATH, new string[] {
+                $"{treeNodeTypeName} Path \"{string.Join('\\', path)}\" is invalid. It must be less than {maxDepth} levels deep.",
+                "Learn more about naming restrictions here: https://learn.microsoft.com/en-us/azure/devops/organizations/settings/about-areas-iterations?view=azure-devops#naming-restrictions"
+            });
+        }
+
+
+        // Path should always start with the project name ADO expects an absolute path
+        if (!string.Equals(path.First(), root.Name, StringComparison.OrdinalIgnoreCase)) {
+            return OneFuzzResultVoid.Error(ErrorCode.ADO_VALIDATION_INVALID_PATH, new string[] {
+                $"{treeNodeTypeName} Path \"{string.Join('\\', path)}\" is invalid. It must start with the project name, \"{root.Name}\".",
+                $"Example: \"{root.Name}\\{path}\".",
+            });
+        }
+
+        // Validate that each part of the path is a valid child of the previous part
+        var current = root;
+        foreach (var part in path.Skip(1)) {
+            var child = current.Children?.FirstOrDefault(x => string.Equals(x.Name, part, StringComparison.OrdinalIgnoreCase));
+            if (child == null) {
+                if (current.Children is null || !current.Children.Any()) {
+                    return OneFuzzResultVoid.Error(ErrorCode.ADO_VALIDATION_INVALID_PATH, new string[] {
+                        $"{treeNodeTypeName} Path \"{string.Join('\\', path)}\" is invalid. \"{current.Name}\" has no children.",
+                    });
+                } else {
+                    return OneFuzzResultVoid.Error(ErrorCode.ADO_VALIDATION_INVALID_PATH, new string[] {
+                        $"{treeNodeTypeName} Path \"{string.Join('\\', path)}\" is invalid. \"{part}\" is not a valid child of \"{current.Name}\".",
+                        $"Valid children of \"{current.Name}\" are: [{string.Join(',', current.Children?.Select(x => $"\"{x.Name}\"") ?? new List<string>())}].",
+                    });
+                }
+            }
+
+            current = child;
+        }
+
+        return OneFuzzResultVoid.Ok;
     }
 
     public static async Async.Task<OneFuzzResultVoid> Validate(AdoTemplate config) {
@@ -124,10 +231,9 @@ public class Ado : NotificationsBase, IAdo {
             return OneFuzzResultVoid.Error(ErrorCode.ADO_VALIDATION_INVALID_PAT, "Auth token is missing or invalid");
         }
 
+        var witClient = await connection.GetClientAsync<WorkItemTrackingHttpClient>();
         try {
             // Validate unique_fields are part of the project's valid fields
-            var witClient = await connection.GetClientAsync<WorkItemTrackingHttpClient>();
-
             // The set of valid fields for this project according to ADO
             var projectValidFields = await GetValidFields(witClient, config.Project);
 
@@ -162,6 +268,32 @@ public class Ado : NotificationsBase, IAdo {
             });
         }
 
+        try {
+            // Validate AreaPath and IterationPath exist
+            // This also validates that the config.Project exists
+            if (config.AdoFields.TryGetValue("System.AreaPath", out var areaPathString)) {
+                var path = areaPathString.Split('\\');
+                var root = await witClient.GetClassificationNodeAsync(config.Project, TreeStructureGroup.Areas, depth: path.Length - 1);
+                var validateAreaPath = ValidateTreePath(path, root);
+                if (!validateAreaPath.IsOk) {
+                    return validateAreaPath;
+                }
+            }
+            if (config.AdoFields.TryGetValue("System.IterationPath", out var iterationPathString)) {
+                var path = iterationPathString.Split('\\');
+                var root = await witClient.GetClassificationNodeAsync(config.Project, TreeStructureGroup.Iterations, depth: path.Length - 1);
+                var validateIterationPath = ValidateTreePath(path, root);
+                if (!validateIterationPath.IsOk) {
+                    return validateIterationPath;
+                }
+            }
+        } catch (Exception e) {
+            return OneFuzzResultVoid.Error(ErrorCode.ADO_VALIDATION_UNEXPECTED_ERROR, new string[] {
+                "Failed to query and validate against the classification nodes for this project",
+                $"Exception: {e}",
+            });
+        }
+
         return OneFuzzResultVoid.Ok;
     }
 
@@ -174,7 +306,7 @@ public class Ado : NotificationsBase, IAdo {
             .ToDictionary(field => field.ReferenceName.ToLowerInvariant());
     }
 
-    private static async Async.Task ProcessNotification(IOnefuzzContext context, Container container, string filename, AdoTemplate config, Report report, ILogger logTracer, IList<(string, string)> notificationInfo, Renderer? renderer = null) {
+    private static async Async.Task ProcessNotification(IOnefuzzContext context, Container container, string filename, AdoTemplate config, Report report, ILogger logTracer, IList<(string, string)> notificationInfo, Renderer? renderer = null, bool isRegression = false) {
         if (!config.AdoFields.TryGetValue(TITLE_FIELD, out var issueTitle)) {
             issueTitle = "{{ report.crash_site }} - {{ report.executable }}";
         }
@@ -187,7 +319,7 @@ public class Ado : NotificationsBase, IAdo {
 
         var renderedConfig = RenderAdoTemplate(logTracer, renderer, config, instanceUrl);
         var ado = new AdoConnector(renderedConfig, project!, client, instanceUrl, logTracer, await GetValidFields(client, project));
-        await ado.Process(notificationInfo);
+        await ado.Process(notificationInfo, isRegression);
     }
 
     public static RenderedAdoTemplate RenderAdoTemplate(ILogger logTracer, Renderer renderer, AdoTemplate original, Uri instanceUrl) {
@@ -228,7 +360,8 @@ public class Ado : NotificationsBase, IAdo {
             original.OnDuplicate.SetState,
             onDuplicateAdoFields,
             original.OnDuplicate.Comment != null ? Render(renderer, original.OnDuplicate.Comment, instanceUrl, logTracer) : null,
-            onDuplicateUnless
+            onDuplicateUnless,
+            original.OnDuplicate.RegressionIgnoreStates
         );
 
         return new RenderedAdoTemplate(
@@ -239,6 +372,7 @@ public class Ado : NotificationsBase, IAdo {
             original.UniqueFields,
             adoFields,
             onDuplicate,
+            original.AdoDuplicateFields,
             original.Comment != null ? Render(renderer, original.Comment, instanceUrl, logTracer) : null
         );
     }
@@ -362,7 +496,7 @@ public class Ado : NotificationsBase, IAdo {
                 return false;
             }
 
-            if (_config.OnDuplicate.Comment != null) {
+            if (!string.IsNullOrEmpty(_config.OnDuplicate.Comment)) {
                 var comment = _config.OnDuplicate.Comment;
                 _ = await _client.AddCommentAsync(
                     new CommentCreate() {
@@ -473,7 +607,7 @@ public class Ado : NotificationsBase, IAdo {
             return (taskType, document);
         }
 
-        public async Async.Task Process(IList<(string, string)> notificationInfo) {
+        public async Async.Task Process(IList<(string, string)> notificationInfo, bool isRegression) {
             var updated = false;
             WorkItem? oldestWorkItem = null;
             await foreach (var workItem in ExistingWorkItems(notificationInfo)) {
@@ -483,8 +617,15 @@ public class Ado : NotificationsBase, IAdo {
                     _logTracer.AddTags(new List<(string, string)> { ("MatchingWorkItemIds", $"{workItem.Id}") });
                     _logTracer.LogInformation("Found matching work item");
                 }
-                if (IsADODuplicateWorkItem(workItem)) {
+                if (IsADODuplicateWorkItem(workItem, _config.AdoDuplicateFields)) {
                     continue;
+                }
+
+                var regressionStatesToIgnore = _config.OnDuplicate.RegressionIgnoreStates != null ? _config.OnDuplicate.RegressionIgnoreStates : DEFAULT_REGRESSION_IGNORE_STATES;
+                if (isRegression) {
+                    var state = (string)workItem.Fields["System.State"];
+                    if (regressionStatesToIgnore.Contains(state, StringComparer.InvariantCultureIgnoreCase))
+                        continue;
                 }
 
                 using (_logTracer.BeginScope("Non-duplicate work item")) {
@@ -496,39 +637,46 @@ public class Ado : NotificationsBase, IAdo {
                 updated = true;
             }
 
-            if (!updated) {
-                if (oldestWorkItem != null) {
-                    // We have matching work items but all are duplicates
-                    _logTracer.AddTags(notificationInfo);
-                    _logTracer.LogInformation($"All matching work items were duplicates, re-opening the oldest one");
-                    var stateChanged = await UpdateExisting(oldestWorkItem, notificationInfo);
-                    if (stateChanged) {
-                        // add a comment if we re-opened the bug
-                        _ = await _client.AddCommentAsync(
-                            new CommentCreate() {
-                                Text =
-                                    "This work item was re-opened because OneFuzz could only find related work items that are marked as duplicate."
-                            },
-                            _project,
-                            (int)oldestWorkItem.Id!);
-                    }
-                } else {
-                    // We never saw a work item like this before, it must be new
-                    var entry = await CreateNew();
-                    var adoEventType = "AdoNewItem";
-                    _logTracer.AddTags(notificationInfo);
-                    _logTracer.AddTag("WorkItemId", entry.Id.HasValue ? entry.Id.Value.ToString() : "");
-                    _logTracer.LogEvent(adoEventType);
+            if (updated || isRegression) {
+                return;
+            }
+
+            if (oldestWorkItem != null) {
+                // We have matching work items but all are duplicates
+                _logTracer.AddTags(notificationInfo);
+                _logTracer.LogInformation($"All matching work items were duplicates, re-opening the oldest one");
+                var stateChanged = await UpdateExisting(oldestWorkItem, notificationInfo);
+                if (stateChanged) {
+                    // add a comment if we re-opened the bug
+                    _ = await _client.AddCommentAsync(
+                        new CommentCreate() {
+                            Text =
+                                "This work item was re-opened because OneFuzz could only find related work items that are marked as duplicate."
+                        },
+                        _project,
+                        (int)oldestWorkItem.Id!);
                 }
+            } else {
+                // We never saw a work item like this before, it must be new
+                var entry = await CreateNew();
+                var adoEventType = "AdoNewItem";
+                _logTracer.AddTags(notificationInfo);
+                _logTracer.AddTag("WorkItemId", entry.Id.HasValue ? entry.Id.Value.ToString() : "");
+                _logTracer.LogEvent(adoEventType);
             }
         }
 
-        private static bool IsADODuplicateWorkItem(WorkItem wi) {
+        private static bool IsADODuplicateWorkItem(WorkItem wi, Dictionary<string, string>? duplicateFields) {
             // A work item could have System.State == Resolve && System.Reason == Duplicate
             // OR it could have System.State == Closed && System.Reason == Duplicate
             // I haven't found any other combinations where System.Reason could be duplicate but just to be safe
             // we're explicitly _not_ checking the state of the work item to determine if it's duplicate
-            return wi.Fields.ContainsKey("System.Reason") && string.Equals(wi.Fields["System.Reason"].ToString(), "Duplicate")
+            return wi.Fields.ContainsKey("System.Reason") && string.Equals(wi.Fields["System.Reason"].ToString(), "Duplicate", StringComparison.OrdinalIgnoreCase)
+            || wi.Fields.ContainsKey("Microsoft.VSTS.Common.ResolvedReason") && string.Equals(wi.Fields["Microsoft.VSTS.Common.ResolvedReason"].ToString(), "Duplicate", StringComparison.OrdinalIgnoreCase)
+            || duplicateFields?.Any(fieldPair => {
+                var (field, value) = fieldPair;
+                return wi.Fields.ContainsKey(field) && string.Equals(wi.Fields[field].ToString(), value, StringComparison.OrdinalIgnoreCase);
+            }) == true
             // Alternatively, the work item can also specify a 'relation' to another work item.
             // This is typically used to create parent/child relationships between work items but can also
             // Be used to mark duplicates so we should check this as well.

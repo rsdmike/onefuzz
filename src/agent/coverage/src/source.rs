@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use std::collections::{BTreeMap, BTreeSet};
+
 use std::num::NonZeroU32;
 
 use anyhow::{Context, Result};
@@ -11,6 +12,7 @@ use debuggable_module::load_module::LoadModule;
 use debuggable_module::loader::Loader;
 use debuggable_module::path::FilePath;
 use debuggable_module::{Module, Offset};
+use symbolic::symcache::transform::{SourceLocation, Transformer};
 
 use crate::allowlist::AllowList;
 use crate::binary::BinaryCoverage;
@@ -51,14 +53,13 @@ impl From<Line> for u32 {
 
 pub fn binary_to_source_coverage(
     binary: &BinaryCoverage,
-    allowlist: impl Into<Option<AllowList>>,
+    source_allowlist: &AllowList,
 ) -> Result<SourceCoverage> {
     use std::collections::btree_map::Entry;
 
     use symbolic::debuginfo::Object;
     use symbolic::symcache::{SymCache, SymCacheConverter};
 
-    let allowlist = allowlist.into().unwrap_or_default();
     let loader = Loader::new();
 
     let mut source = SourceCoverage::default();
@@ -69,6 +70,30 @@ pub fn binary_to_source_coverage(
 
         let mut symcache = vec![];
         let mut converter = SymCacheConverter::new();
+
+        if cfg!(windows) {
+            use symbolic::symcache::transform::Function;
+            struct CaseInsensitive {}
+            impl Transformer for CaseInsensitive {
+                fn transform_function<'f>(&'f mut self, f: Function<'f>) -> Function<'f> {
+                    f
+                }
+
+                fn transform_source_location<'f>(
+                    &'f mut self,
+                    mut sl: SourceLocation<'f>,
+                ) -> SourceLocation<'f> {
+                    sl.file.name = sl.file.name.to_ascii_lowercase().into();
+                    sl.file.directory = sl.file.directory.map(|d| d.to_ascii_lowercase().into());
+                    sl.file.comp_dir = sl.file.comp_dir.map(|d| d.to_ascii_lowercase().into());
+                    sl
+                }
+            }
+
+            let case_insensitive_transformer = CaseInsensitive {};
+
+            converter.add_transformer(case_insensitive_transformer);
+        }
 
         let exe = Object::parse(module.executable_data())?;
         converter.process_object(&exe)?;
@@ -106,7 +131,7 @@ pub fn binary_to_source_coverage(
 
                         if let Some(file) = location.file() {
                             // Only include relevant inlinees.
-                            if !allowlist.is_allowed(&file.full_path()) {
+                            if !source_allowlist.is_allowed(&file.full_path()) {
                                 continue;
                             }
 

@@ -7,6 +7,90 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 8.9.0
+
+### Added
+
+* Agent: Added fuzz tests for coverage recording [#3322](https://github.com/microsoft/onefuzz/pull/3322)
+* Agent: Added version checking in local tasks [#3517](https://github.com/microsoft/onefuzz/pull/3517)
+* Agent: Create directories from template specification in local task if they don't exist [#3522](https://github.com/microsoft/onefuzz/pull/3522)
+* CLI: Added a new command for template creation in the local task `onefuzz-task local create-template` [#3531](https://github.com/microsoft/onefuzz/pull/3531)
+* CLI/Deployment/Service: Support for retention policies on containers [#3501](https://github.com/microsoft/onefuzz/pull/3501)
+* Service: Add onefuzz service version to job created events [#3504](https://github.com/microsoft/onefuzz/pull/3504)
+* Service: Added a start time to job and task records [#3440](https://github.com/microsoft/onefuzz/pull/3440)
+
+### Changed
+
+* Agent: Improved handling of unexpected breakpoints [#3493](https://github.com/microsoft/onefuzz/pull/3493)
+* Agent: Updated windows interceptor list [#3528](https://github.com/microsoft/onefuzz/pull/3528), [#3549](https://github.com/microsoft/onefuzz/pull/3549)
+* Agent: Reporting coverage on task start up, ensuring `coverage_data` is emitted at the beginning of every task instead of when `new_coverage` is identified [#3502](https://github.com/microsoft/onefuzz/pull/3502)
+* CLI/Deployment: Updating onefuzz cli requirements.txt to accept `>= onefuzztypes` versions [#3477](https://github.com/microsoft/onefuzz/pull/3477), [#3486](https://github.com/microsoft/onefuzz/pull/3486)
+* Service: Improve area/iteration path validation in notifications [#3489](https://github.com/microsoft/onefuzz/pull/3489)
+* Service: Remove feature flag from heartbeat metrics [#3505](https://github.com/microsoft/onefuzz/pull/3505)
+
+### Fixed
+
+* Agent: Terminate process on timeout in Windows agents for the coverage task [#3529](https://github.com/microsoft/onefuzz/pull/3529)
+* Agent/Service: Bumped several C#, Python, and Rust dependencies [#3425](https://github.com/microsoft/onefuzz/pull/3425), [#3424](https://github.com/microsoft/onefuzz/pull/3424), [#3411](https://github.com/microsoft/onefuzz/pull/3411), [#3437](https://github.com/microsoft/onefuzz/pull/3437), [#3436](https://github.com/microsoft/onefuzz/pull/3436), [#3435](https://github.com/microsoft/onefuzz/pull/3435), [#3478](https://github.com/microsoft/onefuzz/pull/3478), [#3484](https://github.com/microsoft/onefuzz/pull/3484), [#3414](https://github.com/microsoft/onefuzz/pull/3414), [#3474](https://github.com/microsoft/onefuzz/pull/3474), [#3434](https://github.com/microsoft/onefuzz/pull/3434), [#3488](https://github.com/microsoft/onefuzz/pull/3488), [#3503](https://github.com/microsoft/onefuzz/pull/3503), [#3520](https://github.com/microsoft/onefuzz/pull/3520), [#3521](https://github.com/microsoft/onefuzz/pull/3521)
+* Agent: Fixed dependencies in `onefuzz-task` [#3552](https://github.com/microsoft/onefuzz/pull/3552)
+* Service: Removed unnecessary method argument in notifications processing [#3473](https://github.com/microsoft/onefuzz/pull/3473)
+* Service: Ignore regression work item updates when the work item is in some states [#3532](https://github.com/microsoft/onefuzz/pull/3532)
+
+## 8.8.0
+
+### Added
+
+* Agent: Added Mariner Linux support for agent VMs [#3306](https://github.com/microsoft/onefuzz/pull/3306)
+* Service: Added support for custom ado fields that mark work items as duplicate [#3467](https://github.com/microsoft/onefuzz/pull/3467)
+* Service: Permanently store OneFuzz job result data - # crashing input, # regression crashing input, etc. - in Azure storage [#3380](https://github.com/microsoft/onefuzz/pull/3380), [#3439](https://github.com/microsoft/onefuzz/pull/3439)
+* Service: Added validation for Iteration/AreaPath on notifications when a job is submitted with a notification config and for `onefuzz debug notification test_template` [#3386](https://github.com/microsoft/onefuzz/pull/3386)
+
+### Changed
+
+* Agent: Updated libfuzzer-fuzz basic template to include required args and make it match cli [#3429](https://github.com/microsoft/onefuzz/pull/3429)
+* Agent: Downgraded some debug logs from warn to debug [#3450](https://github.com/microsoft/onefuzz/pull/3450)
+* CLI: Removed CLI commands from the local fuzzing tasks as they can now be described via yaml template [#3428](https://github.com/microsoft/onefuzz/pull/3428)
+* Service: AutoScale table entries are now deleted on VMSS shutdown [#3455](https://github.com/microsoft/onefuzz/pull/3455)
+
+### Fixed
+
+* Agent: Fixed local path generation [#3432](https://github.com/microsoft/onefuzz/pull/3432), [#3460](https://github.com/microsoft/onefuzz/pull/3460)
+
+## 8.7.1
+
+### Fixed
+
+* Service: Removed deprecated Azure retention policy setting that was causing scaleset deployment errors [#3452](https://github.com/microsoft/onefuzz/pull/3452)
+
+## 8.7.0
+
+### Added
+
+* Agent: Added a snapshot-based test to coverage implementation [#3368](https://github.com/microsoft/onefuzz/pull/3368)
+* Agent/CLI/Service: Added ability to capture crash dumps from libfuzzer, when provided [#2793](https://github.com/microsoft/onefuzz/pull/2793) [#3409](https://github.com/microsoft/onefuzz/pull/3409)
+* CLI/Service: Implemented `--with_tasks ` option for `onefuzz jobs get` command to expand the task information [#3343](https://github.com/microsoft/onefuzz/pull/3343)
+
+### Changed
+
+* Agent: Migrated all the task types to the template model [#3397](https://github.com/microsoft/onefuzz/pull/3307)
+* Agent: Removed `srcview` code from OneFuzz since it is not currently utilized [#3376](https://github.com/microsoft/onefuzz/pull/3376)
+* Agent: Updated default windows VM image to windows 11 [#3374](https://github.com/microsoft/onefuzz/pull/3374)
+* Agent: Migrated `winapi` to `windows-rs`, the newer Microsoft supported version of the Windows API bindings for Rust [#3050](https://github.com/microsoft/onefuzz/pull/3050)
+* Deployment: Updated the default deployment option for `EnableWorkItemCreation` feature flag to be enabled [#3387](https://github.com/microsoft/onefuzz/pull/3387)
+
+### Fixed
+
+* Agent: Deserialize the coverage files directly into the output files [#3410](https://github.com/microsoft/onefuzz/pull/3410)
+* Agent/Deployment/Service: Bumped several C#, Python, and Rust dependencies as well as the Rust edition across all Rust crates [#3396](https://github.com/microsoft/onefuzz/pull/3396), [#3161](https://github.com/microsoft/onefuzz/pull/3161), [#3346](https://github.com/microsoft/onefuzz/pull/3346), [#3391](https://github.com/microsoft/onefuzz/pull/3391), [#2870](https://github.com/microsoft/onefuzz/pull/2870), [#3392](https://github.com/microsoft/onefuzz/pull/3392), [#3402](https://github.com/microsoft/onefuzz/pull/3402)
+* Agent: Fixed a bug in agent `DirectoryMonitor` by adding error tolerance when attempting to fetch metadata for `CreateKind::Any` or `CreateKind::Other` events [#3393](https://github.com/microsoft/onefuzz/pull/3393)
+* Service: Fixed tag shadowing in logging by giving precedence to the tags produced by log messages over the tags added prior to the call, when the tag names clashed [#3388](https://github.com/microsoft/onefuzz/pull/3388)
+
+## 8.6.3
+
+### Fixed
+
+* Service: Fixed another duplicate Azure DevOps work item creation case by handling `Microsoft.VSTS.Common.ResolvedReason` field when present [#3383](https://github.com/microsoft/onefuzz/pull/3383)
+
 ## 8.6.2
 
 ### Fixed

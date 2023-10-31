@@ -3,7 +3,7 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from onefuzztypes.enums import OS, ContainerType, TaskDebugFlag, TaskType
 from onefuzztypes.models import Job, NotificationConfig
@@ -51,6 +51,7 @@ class Radamsa(Command):
         ensemble_sync_delay: Optional[int] = None,
         target_timeout: Optional[int] = None,
         extra_setup_container: Optional[Container] = None,
+        min_available_memory_mb: Optional[int] = None,
     ) -> Optional[Job]:
         """
         Basic radamsa job
@@ -94,7 +95,9 @@ class Radamsa(Command):
 
         if existing_inputs:
             self.onefuzz.containers.get(existing_inputs)
-            helper.containers[ContainerType.readonly_inputs] = existing_inputs
+            helper.add_existing_container(
+                ContainerType.readonly_inputs, existing_inputs
+            )
         else:
             helper.define_containers(ContainerType.readonly_inputs)
         helper.create_containers()
@@ -108,7 +111,7 @@ class Radamsa(Command):
         if (
             len(
                 self.onefuzz.containers.files.list(
-                    helper.containers[ContainerType.readonly_inputs]
+                    helper.containers[ContainerType.readonly_inputs].name
                 ).files
             )
             == 0
@@ -147,21 +150,28 @@ class Radamsa(Command):
 
         self.logger.info("creating radamsa task")
 
-        containers = [
+        containers: List[Tuple[ContainerType, Container]] = [
             (ContainerType.tools, tools),
-            (ContainerType.setup, helper.containers[ContainerType.setup]),
-            (ContainerType.crashes, helper.containers[ContainerType.crashes]),
+            (ContainerType.setup, helper.container_name(ContainerType.setup)),
+            (ContainerType.crashes, helper.container_name(ContainerType.crashes)),
             (
                 ContainerType.readonly_inputs,
-                helper.containers[ContainerType.readonly_inputs],
+                helper.container_name(ContainerType.readonly_inputs),
             ),
         ]
 
         if extra_setup_container is not None:
-            containers.append((ContainerType.extra_setup, extra_setup_container))
+            containers.append(
+                (
+                    ContainerType.extra_setup,
+                    extra_setup_container,
+                )
+            )
+
+        job = helper.create_job()
 
         fuzzer_task = self.onefuzz.tasks.create(
-            helper.job.job_id,
+            job.job_id,
             TaskType.generic_generator,
             target_exe_blob_name,
             containers,
@@ -180,25 +190,31 @@ class Radamsa(Command):
             debug=debug,
             ensemble_sync_delay=ensemble_sync_delay,
             target_timeout=target_timeout,
+            min_available_memory_mb=min_available_memory_mb,
         )
 
         report_containers = [
-            (ContainerType.setup, helper.containers[ContainerType.setup]),
-            (ContainerType.crashes, helper.containers[ContainerType.crashes]),
-            (ContainerType.reports, helper.containers[ContainerType.reports]),
+            (ContainerType.setup, helper.container_name(ContainerType.setup)),
+            (ContainerType.crashes, helper.container_name(ContainerType.crashes)),
+            (ContainerType.reports, helper.container_name(ContainerType.reports)),
             (
                 ContainerType.unique_reports,
-                helper.containers[ContainerType.unique_reports],
+                helper.container_name(ContainerType.unique_reports),
             ),
-            (ContainerType.no_repro, helper.containers[ContainerType.no_repro]),
+            (ContainerType.no_repro, helper.container_name(ContainerType.no_repro)),
         ]
 
         if extra_setup_container is not None:
-            report_containers.append((ContainerType.extra_setup, extra_setup_container))
+            report_containers.append(
+                (
+                    ContainerType.extra_setup,
+                    extra_setup_container,
+                )
+            )
 
         self.logger.info("creating generic_crash_report task")
         self.onefuzz.tasks.create(
-            helper.job.job_id,
+            job.job_id,
             TaskType.generic_crash_report,
             target_exe_blob_name,
             report_containers,
@@ -215,6 +231,7 @@ class Radamsa(Command):
             prereq_tasks=[fuzzer_task.task_id],
             debug=debug,
             target_timeout=target_timeout,
+            min_available_memory_mb=min_available_memory_mb,
         )
 
         if helper.platform == OS.windows:
@@ -233,19 +250,22 @@ class Radamsa(Command):
             self.logger.info("creating custom analysis")
 
             analysis_containers = [
-                (ContainerType.setup, helper.containers[ContainerType.setup]),
+                (ContainerType.setup, helper.container_name(ContainerType.setup)),
                 (ContainerType.tools, tools),
-                (ContainerType.analysis, helper.containers[ContainerType.analysis]),
-                (ContainerType.crashes, helper.containers[ContainerType.crashes]),
+                (ContainerType.analysis, helper.container_name(ContainerType.analysis)),
+                (ContainerType.crashes, helper.container_name(ContainerType.crashes)),
             ]
 
             if extra_setup_container is not None:
                 analysis_containers.append(
-                    (ContainerType.extra_setup, extra_setup_container)
+                    (
+                        ContainerType.extra_setup,
+                        extra_setup_container,
+                    )
                 )
 
             self.onefuzz.tasks.create(
-                helper.job.job_id,
+                job.job_id,
                 TaskType.generic_analysis,
                 target_exe_blob_name,
                 analysis_containers,
@@ -262,8 +282,9 @@ class Radamsa(Command):
                 prereq_tasks=[fuzzer_task.task_id],
                 debug=debug,
                 target_timeout=target_timeout,
+                min_available_memory_mb=min_available_memory_mb,
             )
 
         self.logger.info("done creating tasks")
-        helper.wait()
-        return helper.job
+        helper.wait(job)
+        return job

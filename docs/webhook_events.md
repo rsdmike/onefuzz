@@ -143,6 +143,7 @@ If webhook is set to have Event Grid message format then the payload will look a
                 "coverage",
                 "crashes",
                 "inputs",
+                "crashdumps",
                 "no_repro",
                 "readonly_inputs",
                 "reports",
@@ -444,6 +445,11 @@ If webhook is set to have Event Grid message format then the payload will look a
                     "title": "Generator Options",
                     "type": "array"
                 },
+                "min_available_memory_mb": {
+                    "minimum": 0,
+                    "title": "Min Available Memory Mb",
+                    "type": "integer"
+                },
                 "minimized_stack_depth": {
                     "title": "Minimized Stack Depth",
                     "type": "integer"
@@ -719,8 +725,8 @@ If webhook is set to have Event Grid message format then the payload will look a
         "allowed_aad_tenants": [
             "00000000-0000-0000-0000-000000000000"
         ],
-        "default_linux_vm_image": "Canonical:0001-com-ubuntu-server-focal:20_04-lts:latest",
-        "default_windows_vm_image": "MicrosoftWindowsDesktop:Windows-10:win10-21h2-pro:latest",
+        "default_linux_vm_image": "Canonical:0001-com-ubuntu-server-jammy:22_04-lts:latest",
+        "default_windows_vm_image": "MicrosoftWindowsDesktop:Windows-11:win11-22h2-pro:latest",
         "network_config": {
             "address_space": "10.0.0.0/8",
             "subnet": "10.0.0.0/16"
@@ -862,12 +868,12 @@ If webhook is set to have Event Grid message format then the payload will look a
                     "type": "object"
                 },
                 "default_linux_vm_image": {
-                    "default": "Canonical:0001-com-ubuntu-server-focal:20_04-lts:latest",
+                    "default": "Canonical:0001-com-ubuntu-server-jammy:22_04-lts:latest",
                     "title": "Default Linux Vm Image",
                     "type": "string"
                 },
                 "default_windows_vm_image": {
-                    "default": "MicrosoftWindowsDesktop:Windows-10:win10-21h2-pro:latest",
+                    "default": "MicrosoftWindowsDesktop:Windows-11:win11-22h2-pro:latest",
                     "title": "Default Windows Vm Image",
                     "type": "string"
                 },
@@ -1956,6 +1962,7 @@ If webhook is set to have Event Grid message format then the payload will look a
                 "coverage",
                 "crashes",
                 "inputs",
+                "crashdumps",
                 "no_repro",
                 "readonly_inputs",
                 "reports",
@@ -2031,6 +2038,10 @@ If webhook is set to have Event Grid message format then the payload will look a
                 },
                 "original_crash_test_result": {
                     "$ref": "#/definitions/CrashTestResult"
+                },
+                "report_url": {
+                    "title": "Report Url",
+                    "type": "string"
                 }
             },
             "required": [
@@ -2326,6 +2337,11 @@ If webhook is set to have Event Grid message format then the payload will look a
                     "title": "Generator Options",
                     "type": "array"
                 },
+                "min_available_memory_mb": {
+                    "minimum": 0,
+                    "title": "Min Available Memory Mb",
+                    "type": "integer"
+                },
                 "minimized_stack_depth": {
                     "title": "Minimized Stack Depth",
                     "type": "integer"
@@ -2560,7 +2576,7 @@ If webhook is set to have Event Grid message format then the payload will look a
 
 ```json
 {
-    "image": "Canonical:0001-com-ubuntu-server-focal:20_04-lts:latest",
+    "image": "Canonical:0001-com-ubuntu-server-jammy:22_04-lts:latest",
     "pool_name": "example",
     "region": "eastus",
     "scaleset_id": "example-000",
@@ -2867,6 +2883,7 @@ If webhook is set to have Event Grid message format then the payload will look a
                 "coverage",
                 "crashes",
                 "inputs",
+                "crashdumps",
                 "no_repro",
                 "readonly_inputs",
                 "reports",
@@ -3046,6 +3063,11 @@ If webhook is set to have Event Grid message format then the payload will look a
                     },
                     "title": "Generator Options",
                     "type": "array"
+                },
+                "min_available_memory_mb": {
+                    "minimum": 0,
+                    "title": "Min Available Memory Mb",
+                    "type": "integer"
                 },
                 "minimized_stack_depth": {
                     "title": "Minimized Stack Depth",
@@ -3358,6 +3380,7 @@ If webhook is set to have Event Grid message format then the payload will look a
                 "coverage",
                 "crashes",
                 "inputs",
+                "crashdumps",
                 "no_repro",
                 "readonly_inputs",
                 "reports",
@@ -3563,6 +3586,11 @@ If webhook is set to have Event Grid message format then the payload will look a
                     },
                     "title": "Generator Options",
                     "type": "array"
+                },
+                "min_available_memory_mb": {
+                    "minimum": 0,
+                    "title": "Min Available Memory Mb",
+                    "type": "integer"
                 },
                 "minimized_stack_depth": {
                     "title": "Minimized Stack Depth",
@@ -3867,6 +3895,7 @@ If webhook is set to have Event Grid message format then the payload will look a
                 "coverage",
                 "crashes",
                 "inputs",
+                "crashdumps",
                 "no_repro",
                 "readonly_inputs",
                 "reports",
@@ -4046,6 +4075,11 @@ If webhook is set to have Event Grid message format then the payload will look a
                     },
                     "title": "Generator Options",
                     "type": "array"
+                },
+                "min_available_memory_mb": {
+                    "minimum": 0,
+                    "title": "Min Available Memory Mb",
+                    "type": "integer"
                 },
                 "minimized_stack_depth": {
                     "title": "Minimized Stack Depth",
@@ -4324,6 +4358,7 @@ If webhook is set to have Event Grid message format then the payload will look a
                 "coverage",
                 "crashes",
                 "inputs",
+                "crashdumps",
                 "no_repro",
                 "readonly_inputs",
                 "reports",
@@ -4503,6 +4538,11 @@ If webhook is set to have Event Grid message format then the payload will look a
                     },
                     "title": "Generator Options",
                     "type": "array"
+                },
+                "min_available_memory_mb": {
+                    "minimum": 0,
+                    "title": "Min Available Memory Mb",
+                    "type": "integer"
                 },
                 "minimized_stack_depth": {
                     "title": "Minimized Stack Depth",
@@ -4808,6 +4848,7 @@ If webhook is set to have Event Grid message format then the payload will look a
                 "coverage",
                 "crashes",
                 "inputs",
+                "crashdumps",
                 "no_repro",
                 "readonly_inputs",
                 "reports",
@@ -4987,6 +5028,11 @@ If webhook is set to have Event Grid message format then the payload will look a
                     },
                     "title": "Generator Options",
                     "type": "array"
+                },
+                "min_available_memory_mb": {
+                    "minimum": 0,
+                    "title": "Min Available Memory Mb",
+                    "type": "integer"
                 },
                 "minimized_stack_depth": {
                     "title": "Minimized Stack Depth",
@@ -5422,6 +5468,7 @@ If webhook is set to have Event Grid message format then the payload will look a
                 "coverage",
                 "crashes",
                 "inputs",
+                "crashdumps",
                 "no_repro",
                 "readonly_inputs",
                 "reports",
@@ -6168,12 +6215,12 @@ If webhook is set to have Event Grid message format then the payload will look a
                     "type": "object"
                 },
                 "default_linux_vm_image": {
-                    "default": "Canonical:0001-com-ubuntu-server-focal:20_04-lts:latest",
+                    "default": "Canonical:0001-com-ubuntu-server-jammy:22_04-lts:latest",
                     "title": "Default Linux Vm Image",
                     "type": "string"
                 },
                 "default_windows_vm_image": {
-                    "default": "MicrosoftWindowsDesktop:Windows-10:win10-21h2-pro:latest",
+                    "default": "MicrosoftWindowsDesktop:Windows-11:win11-22h2-pro:latest",
                     "title": "Default Windows Vm Image",
                     "type": "string"
                 },
@@ -6419,6 +6466,10 @@ If webhook is set to have Event Grid message format then the payload will look a
                 },
                 "original_crash_test_result": {
                     "$ref": "#/definitions/CrashTestResult"
+                },
+                "report_url": {
+                    "title": "Report Url",
+                    "type": "string"
                 }
             },
             "required": [
@@ -6726,6 +6777,11 @@ If webhook is set to have Event Grid message format then the payload will look a
                     },
                     "title": "Generator Options",
                     "type": "array"
+                },
+                "min_available_memory_mb": {
+                    "minimum": 0,
+                    "title": "Min Available Memory Mb",
+                    "type": "integer"
                 },
                 "minimized_stack_depth": {
                     "title": "Minimized Stack Depth",

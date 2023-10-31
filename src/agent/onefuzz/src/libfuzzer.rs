@@ -306,17 +306,18 @@ impl LibFuzzer {
         if !result.status.success() {
             // To provide user-actionable errors, try to identify any missing shared libraries.
             match self.find_missing_libraries().await {
-                Ok(missing) => {
+                Ok((missing, errors)) => {
                     if missing.is_empty() {
-                        bail!("fuzzer does not respond to '-help=1'. no missing shared libraries detected. output: {:?}", result);
+                        bail!("fuzzer does not respond to '-help=1'. no missing shared libraries detected. output: {result:?}");
                     } else {
                         let missing = missing.join(", ");
+                        let all_errors = errors.join("\n");
 
-                        bail!("fuzzer does not respond to '-help=1'. missing shared libraries: {}. output: {:?}", missing, result);
+                        bail!("fuzzer does not respond to '-help=1'. missing shared libraries: {missing}. output: {result:?}. all errors: {all_errors}");
                     }
                 }
                 Err(err) => {
-                    bail!("fuzzer does not respond to '-help=1'. additional error while checking for missing shared libraries: {}. output: {:?}", err, result);
+                    bail!("fuzzer does not respond to '-help=1'. additional error while checking for missing shared libraries: {err}. output: {result:?}");
                 }
             }
         }
@@ -324,7 +325,7 @@ impl LibFuzzer {
         Ok(())
     }
 
-    async fn find_missing_libraries(&self) -> Result<Vec<String>> {
+    async fn find_missing_libraries(&self) -> Result<(Vec<String>, Vec<String>)> {
         let cmd = self.build_std_command(None, None, None, None, None)?;
 
         #[cfg(target_os = "linux")]
@@ -333,13 +334,14 @@ impl LibFuzzer {
         #[cfg(target_os = "windows")]
         let blocking = move || dynamic_library::windows::find_missing(cmd);
 
-        let missing = tokio::task::spawn_blocking(blocking).await??;
+        let (missing, errors) = tokio::task::spawn_blocking(blocking).await??;
+
         let missing = missing.into_iter().map(|m| m.name).collect();
 
-        Ok(missing)
+        Ok((missing, errors))
     }
 
-    pub async fn fuzz(
+    pub fn fuzz(
         &self,
         fault_dir: impl AsRef<Path>,
         corpus_dir: impl AsRef<Path>,
@@ -352,8 +354,7 @@ impl LibFuzzer {
         // specify that a new file `crash-<digest>` should be written to a
         // _directory_ `<corpus_dir>`, we must ensure that the prefix includes a
         // trailing path separator.
-        let artifact_prefix: OsString =
-            format!("-artifact_prefix={}/", fault_dir.as_ref().display()).into();
+        let artifact_prefix = artifact_prefix(fault_dir.as_ref());
 
         let mut cmd = self.build_command(
             Some(fault_dir.as_ref()),
@@ -363,10 +364,11 @@ impl LibFuzzer {
             None,
         )?;
 
+        info!("Running command: {:?}", &cmd);
+
         let child = cmd
             .spawn()
             .with_context(|| format_err!("libfuzzer failed to start: {}", self.exe.display()))?;
-
         Ok(child)
     }
 
@@ -439,6 +441,20 @@ impl LibFuzzer {
             }),
         }
     }
+}
+
+#[cfg(target_os = "windows")]
+fn artifact_prefix(fault_dir: &Path) -> OsString {
+    if fault_dir.is_absolute() {
+        format!("-artifact_prefix={}\\", fault_dir.display()).into()
+    } else {
+        format!("-artifact_prefix={}/", fault_dir.display()).into()
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn artifact_prefix(fault_dir: &Path) -> OsString {
+    format!("-artifact_prefix={}/", fault_dir.display()).into()
 }
 
 pub struct LibFuzzerLine {

@@ -11,6 +11,7 @@ public record BaseRequest {
 
 public record CanScheduleRequest(
     [property: Required] Guid MachineId,
+    Guid? JobId,
     [property: Required] Guid TaskId
 ) : BaseRequest;
 
@@ -63,9 +64,11 @@ public record WorkerEvent(
 ) : NodeEventBase;
 
 public record WorkerRunningEvent(
+    Guid? JobId,
     [property: Required] Guid TaskId);
 
 public record WorkerDoneEvent(
+    Guid? JobId,
     [property: Required] Guid TaskId,
     [property: Required] ExitStatus ExitStatus,
     [property: Required] string Stderr,
@@ -81,8 +84,15 @@ public record NodeStateUpdate(
 [JsonConverter(typeof(SubclassConverter<NodeStateData>))]
 public abstract record NodeStateData;
 
+public record NodeSettingUpData(
+    [property: Required] Guid JobId,
+    [property: Required] Guid TaskId);
+
+// TODO [future]: remove Tasks and make TaskData Required
+// once all agents are compatible
 public record NodeSettingUpEventData(
-   [property: Required] List<Guid> Tasks
+    List<Guid>? Tasks,
+    List<NodeSettingUpData>? TaskData
 ) : NodeStateData;
 
 public record NodeDoneEventData(
@@ -118,6 +128,11 @@ public record ContainerDelete(
     IDictionary<string, string>? Metadata = null
 ) : BaseRequest;
 
+public record ContainerUpdate(
+    [property: Required] Container Name,
+    [property: Required] IDictionary<string, string> Metadata
+) : BaseRequest;
+
 public record NotificationCreate(
     [property: Required] Container Container,
     [property: Required] bool ReplaceExisting,
@@ -131,7 +146,7 @@ public record NotificationSearch(
 
 
 public record NotificationTest(
-    [property: Required] Report Report,
+    [property: Required] IReport Report,
     [property: Required] Notification Notification
 ) : BaseRequest;
 

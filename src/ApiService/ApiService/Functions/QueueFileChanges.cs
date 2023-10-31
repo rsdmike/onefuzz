@@ -1,6 +1,9 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading.Tasks;
 using Azure.Core;
+using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
 using Microsoft.OneFuzz.Service.OneFuzzLib.Orm;
@@ -54,16 +57,16 @@ public class QueueFileChanges {
             return;
         }
 
-        try {
-            // Setting isLastRetryAttempt to false will rethrow any exceptions
-            // With the intention that the azure functions runtime will handle requeing
-            // the message for us. The difference is for the poison queue, we're handling the
-            // requeuing ourselves because azure functions doesn't support retry policies
-            // for queue based functions.
+        var storageAccount = new ResourceIdentifier(topicElement.GetString()!);
 
-            var result = await FileAdded(fileChangeEvent, isLastRetryAttempt: false);
-            if (!result.IsOk && result.ErrorV.Code == ErrorCode.ADO_WORKITEM_PROCESSING_DISABLED) {
-                await RequeueMessage(msg, TimeSpan.FromDays(1));
+        try {
+            var result = await FileAdded(storageAccount, fileChangeEvent);
+            if (!result.IsOk) {
+                if (result.ErrorV.Code == ErrorCode.ADO_WORKITEM_PROCESSING_DISABLED) {
+                    await RequeueMessage(msg, TimeSpan.FromDays(1), incrementDequeueCount: false);
+                } else {
+                    await RequeueMessage(msg);
+                }
             }
         } catch (Exception e) {
             _log.LogError(e, "File Added failed");
@@ -71,19 +74,60 @@ public class QueueFileChanges {
         }
     }
 
-    private async Async.Task<OneFuzzResultVoid> FileAdded(JsonDocument fileChangeEvent, bool isLastRetryAttempt) {
+    private async Async.Task<OneFuzzResultVoid> FileAdded(ResourceIdentifier storageAccount, JsonDocument fileChangeEvent) {
         var data = fileChangeEvent.RootElement.GetProperty("data");
         var url = data.GetProperty("url").GetString()!;
         var parts = url.Split("/").Skip(3).ToList();
 
-        var container = parts[0];
+        var container = Container.Parse(parts[0]);
         var path = string.Join('/', parts.Skip(1));
 
-        _log.LogInformation("file added : {Container} - {Path}", container, path);
-        return await _notificationOperations.NewFiles(Container.Parse(container), path, isLastRetryAttempt);
+        // We don't want to store file added events for the events container because that causes an infinite loop
+        if (container == WellKnownContainers.Events) {
+            return Result.Ok();
+        }
+
+        _log.LogInformation("file added : {Container} - {Path}", container.String, path);
+
+        var account = await _storage.GetBlobServiceClientForAccount(storageAccount);
+        var containerClient = account.GetBlobContainerClient(container.String);
+        var containerProps = await containerClient.GetPropertiesAsync();
+
+        if (_context.NotificationOperations.ShouldPauseNotificationsForContainer(containerProps.Value.Metadata)) {
+            return Error.Create(ErrorCode.ADO_WORKITEM_PROCESSING_DISABLED, $"container {container} has a metadata tag set to pause notifications processing");
+        }
+
+        var (_, result) = await (
+            ApplyRetentionPolicy(containerClient, containerProps, path),
+            _notificationOperations.NewFiles(container, path));
+
+        return result;
     }
 
-    private async Async.Task RequeueMessage(string msg, TimeSpan? visibilityTimeout = null) {
+    private async Async.Task<bool> ApplyRetentionPolicy(BlobContainerClient containerClient, BlobContainerProperties containerProps, string path) {
+        if (await _context.FeatureManagerSnapshot.IsEnabledAsync(FeatureFlagConstants.EnableContainerRetentionPolicies)) {
+            // default retention period can be applied to the container
+            // if one exists, we will set the expiry date on the newly-created blob, if it doesn't already have one
+            var retentionPeriod = RetentionPolicyUtils.GetContainerRetentionPeriodFromMetadata(containerProps.Metadata);
+            if (!retentionPeriod.IsOk) {
+                _log.LogError("invalid retention period: {Error}", retentionPeriod.ErrorV);
+            } else if (retentionPeriod.OkV is TimeSpan period) {
+                var blobClient = containerClient.GetBlobClient(path);
+                var tags = (await blobClient.GetTagsAsync()).Value.Tags;
+                var expiryDate = DateTime.UtcNow + period;
+                var tag = RetentionPolicyUtils.CreateExpiryDateTag(DateOnly.FromDateTime(expiryDate));
+                if (tags.TryAdd(tag.Key, tag.Value)) {
+                    _ = await blobClient.SetTagsAsync(tags);
+                    _log.LogInformation("applied container retention policy ({Policy}) to {Path}", period, path);
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private async Async.Task RequeueMessage(string msg, TimeSpan? visibilityTimeout = null, bool incrementDequeueCount = true) {
         var json = JsonNode.Parse(msg);
 
         // Messages that are 'manually' requeued by us as opposed to being requeued by the azure functions runtime
@@ -94,20 +138,24 @@ public class QueueFileChanges {
             newCustomDequeueCount = json["data"]!["customDequeueCount"]!.GetValue<int>();
         }
 
-        var queueName = QueueFileChangesQueueName;
         if (newCustomDequeueCount > MAX_DEQUEUE_COUNT) {
             _log.LogWarning("Message retried more than {MAX_DEQUEUE_COUNT} times with no success: {msg}", MAX_DEQUEUE_COUNT, msg);
-            queueName = QueueFileChangesPoisonQueueName;
+            await _context.Queue.QueueObject(
+                QueueFileChangesPoisonQueueName,
+                json,
+                StorageType.Config)
+                .IgnoreResult();
+        } else {
+            if (incrementDequeueCount) {
+                json!["data"]!["customDequeueCount"] = newCustomDequeueCount + 1;
+            }
+            await _context.Queue.QueueObject(
+                QueueFileChangesQueueName,
+                json,
+                StorageType.Config,
+                visibilityTimeout ?? CalculateExponentialBackoff(newCustomDequeueCount))
+                .IgnoreResult();
         }
-
-        json!["data"]!["customDequeueCount"] = newCustomDequeueCount + 1;
-
-        await _context.Queue.QueueObject(
-            queueName,
-            json,
-            StorageType.Config,
-            visibilityTimeout ?? CalculateExponentialBackoff(newCustomDequeueCount))
-            .IgnoreResult();
     }
 
     // Possible return values:

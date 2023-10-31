@@ -8,16 +8,6 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::{Context, Result};
-use async_trait::async_trait;
-use onefuzz::expand::Expand;
-use onefuzz::fs::set_executable;
-use onefuzz::{blob::BlobUrl, sha256, syncdir::SyncedDir};
-use reqwest::Url;
-use serde::Deserialize;
-use storage_queue::{Message, QueueClient};
-use tokio::fs;
-
 use crate::tasks::report::crash_report::*;
 use crate::tasks::report::dotnet::common::collect_exception_info;
 use crate::tasks::{
@@ -26,6 +16,16 @@ use crate::tasks::{
     heartbeat::{HeartbeatSender, TaskHeartbeatClient},
     utils::{default_bool_true, try_resolve_setup_relative_path},
 };
+use anyhow::{Context, Result};
+use async_trait::async_trait;
+use onefuzz::expand::Expand;
+use onefuzz::fs::set_executable;
+use onefuzz::{blob::BlobUrl, sha256, syncdir::SyncedDir};
+use onefuzz_result::job_result::TaskJobResultClient;
+use reqwest::Url;
+use serde::Deserialize;
+use storage_queue::{Message, QueueClient};
+use tokio::fs;
 
 const DOTNET_DUMP_TOOL_NAME: &str = "dotnet-dump";
 
@@ -57,6 +57,32 @@ pub struct Config {
 
     #[serde(flatten)]
     pub common: CommonConfig,
+}
+
+impl Config {
+    pub fn get_expand(&self) -> Expand<'_> {
+        let tools_dir = self.tools.local_path.to_string_lossy().into_owned();
+
+        self.common
+            .get_expand()
+            .target_exe(&self.target_exe)
+            .target_options(&self.target_options)
+            .tools_dir(tools_dir)
+            .set_optional_ref(&self.reports, |expand, reports| {
+                expand.reports_dir(reports.local_path.as_path())
+            })
+            .set_optional_ref(&self.crashes, |expand, crashes| {
+                expand
+                    .set_optional_ref(
+                        &crashes.remote_path.clone().and_then(|u| u.account()),
+                        |expand, account| expand.crashes_account(account),
+                    )
+                    .set_optional_ref(
+                        &crashes.remote_path.clone().and_then(|u| u.container()),
+                        |expand, container| expand.crashes_container(container),
+                    )
+            })
+    }
 }
 
 pub struct DotnetCrashReportTask {
@@ -114,25 +140,26 @@ impl DotnetCrashReportTask {
 pub struct AsanProcessor {
     config: Arc<Config>,
     heartbeat_client: Option<TaskHeartbeatClient>,
+    job_result_client: Option<TaskJobResultClient>,
 }
 
 impl AsanProcessor {
     pub async fn new(config: Arc<Config>) -> Result<Self> {
         let heartbeat_client = config.common.init_heartbeat(None).await?;
+        let job_result_client = config.common.init_job_result().await?;
 
         Ok(Self {
             config,
             heartbeat_client,
+            job_result_client,
         })
     }
 
     async fn target_exe(&self) -> Result<String> {
-        let tools_dir = self.config.tools.local_path.to_string_lossy().into_owned();
-
         // Try to expand `target_exe` with support for `{tools_dir}`.
         //
         // Allows using `LibFuzzerDotnetLoader.exe` from a shared tools container.
-        let expand = Expand::new(&self.config.common.machine_identity).tools_dir(tools_dir);
+        let expand = self.config.get_expand();
         let expanded = expand.evaluate_value(self.config.target_exe.to_string_lossy())?;
         let expanded_path = Path::new(&expanded);
 
@@ -180,13 +207,7 @@ impl AsanProcessor {
         let mut args = vec![target_exe];
         args.extend(self.config.target_options.clone());
 
-        let expand = Expand::new(&self.config.common.machine_identity)
-            .input_path(input)
-            .setup_dir(&self.config.common.setup_dir)
-            .set_optional_ref(&self.config.common.extra_setup_dir, Expand::extra_setup_dir)
-            .set_optional_ref(&self.config.common.extra_output, |expand, value| {
-                expand.extra_output_dir(value.local_path.as_path())
-            });
+        let expand = self.config.get_expand().input_path(input);
 
         let expanded_args = expand.evaluate(&args)?;
 
@@ -260,6 +281,7 @@ impl Processor for AsanProcessor {
                 &self.config.unique_reports,
                 &self.config.reports,
                 &self.config.no_repro,
+                &self.job_result_client,
             )
             .await;
 
@@ -273,4 +295,56 @@ impl Processor for AsanProcessor {
 
         Ok(())
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use onefuzz::expand::PlaceHolder;
+    use proptest::prelude::*;
+
+    use crate::config_test_utils::GetExpandFields;
+
+    use super::Config;
+
+    impl GetExpandFields for Config {
+        fn get_expand_fields(&self) -> Vec<(PlaceHolder, String)> {
+            let mut params = self.common.get_expand_fields();
+            params.push((
+                PlaceHolder::TargetExe,
+                dunce::canonicalize(&self.target_exe)
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+            ));
+            params.push((PlaceHolder::TargetOptions, self.target_options.join(" ")));
+            params.push((
+                PlaceHolder::ToolsDir,
+                dunce::canonicalize(&self.tools.local_path)
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+            ));
+            if let Some(reports) = &self.reports {
+                params.push((
+                    PlaceHolder::ReportsDir,
+                    dunce::canonicalize(&reports.local_path)
+                        .unwrap()
+                        .to_string_lossy()
+                        .to_string(),
+                ));
+            }
+            if let Some(crashes) = &self.crashes {
+                if let Some(account) = crashes.remote_path.clone().and_then(|u| u.account()) {
+                    params.push((PlaceHolder::CrashesAccount, account));
+                }
+                if let Some(container) = crashes.remote_path.clone().and_then(|u| u.container()) {
+                    params.push((PlaceHolder::CrashesContainer, container));
+                }
+            }
+
+            params
+        }
+    }
+
+    config_test!(Config);
 }

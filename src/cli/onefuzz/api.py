@@ -215,7 +215,7 @@ class Files(Endpoint):
         """get a file from a container"""
         self.logger.debug("getting file from container: %s:%s", container, filename)
         client = self._get_client(container)
-        downloaded = client.download_blob(filename)
+        downloaded: bytes = client.download_blob(filename)
         return downloaded
 
     def download(
@@ -484,6 +484,17 @@ class Containers(Endpoint):
         self.logger.debug("delete container: %s", name)
         return self._req_model(
             "DELETE", responses.BoolResult, data=requests.ContainerDelete(name=name)
+        )
+
+    def update(
+        self, name: str, metadata: Dict[str, str]
+    ) -> responses.ContainerInfoBase:
+        """Update a container's metadata"""
+        self.logger.debug("update container: %s", name)
+        return self._req_model(
+            "PATCH",
+            responses.ContainerInfoBase,
+            data=requests.ContainerUpdate(name=name, metadata=metadata),
         )
 
     def list(self) -> List[responses.ContainerInfoBase]:
@@ -1061,6 +1072,7 @@ class Tasks(Endpoint):
         module_allowlist: Optional[str] = None,
         source_allowlist: Optional[str] = None,
         task_env: Optional[Dict[str, str]] = None,
+        min_available_memory_mb: Optional[int] = None,
     ) -> models.Task:
         """
         Create a task
@@ -1087,11 +1099,10 @@ class Tasks(Endpoint):
         if tags is None:
             tags = {}
 
-        containers_submit = []
-        for container_type, container in containers:
-            containers_submit.append(
-                models.TaskContainers(name=container, type=container_type)
-            )
+        containers_submit = [
+            models.TaskContainers(name=container, type=container_type)
+            for container_type, container in containers
+        ]
 
         config = models.TaskConfig(
             containers=containers_submit,
@@ -1139,6 +1150,7 @@ class Tasks(Endpoint):
                 module_allowlist=module_allowlist,
                 source_allowlist=source_allowlist,
                 task_env=task_env,
+                min_available_memory_mb=min_available_memory_mb,
             ),
         )
 
@@ -1210,6 +1222,7 @@ class JobContainers(Endpoint):
     ) -> None:
         SAFE_TO_REMOVE = [
             enums.ContainerType.crashes,
+            enums.ContainerType.crashdumps,
             enums.ContainerType.setup,
             enums.ContainerType.inputs,
             enums.ContainerType.reports,

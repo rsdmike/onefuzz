@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use anyhow::{anyhow, bail, Error, Result};
+use anyhow::{anyhow, Error, Result};
 use debuggable_module::debuginfo::{DebugInfo, Function};
 use debuggable_module::load_module::LoadModule;
 use debuggable_module::loader::Loader;
@@ -13,8 +13,8 @@ use debuggable_module::windows::WindowsModule;
 use debuggable_module::{Module, Offset};
 use debugger::{BreakpointId, BreakpointType, DebugEventHandler, Debugger, ModuleLoadInfo};
 
-use crate::allowlist::TargetAllowList;
 use crate::binary::{BinaryCoverage, DebugInfoCache};
+use crate::AllowList;
 
 // For a new module image, we defer setting coverage breakpoints until exit from one of these
 // functions (when present). This avoids breaking hotpatching routines in the ASan interceptor
@@ -26,7 +26,7 @@ const PROCESS_IMAGE_DEFERRAL_TRIGGER: &str = "__asan::AsanInitInternal(";
 const LIBRARY_IMAGE_DEFERRAL_TRIGGER: &str = "DllMain(";
 
 pub struct WindowsRecorder<'cache, 'data> {
-    allowlist: TargetAllowList,
+    module_allowlist: AllowList,
     breakpoints: Breakpoints,
     cache: &'cache DebugInfoCache,
     deferred_breakpoints: BTreeMap<BreakpointId, (Breakpoint, DeferralState)>,
@@ -39,7 +39,7 @@ pub struct WindowsRecorder<'cache, 'data> {
 impl<'cache, 'data> WindowsRecorder<'cache, 'data> {
     pub fn new(
         loader: &'data Loader,
-        allowlist: TargetAllowList,
+        module_allowlist: AllowList,
         cache: &'cache DebugInfoCache,
     ) -> Self {
         let breakpoints = Breakpoints::default();
@@ -49,7 +49,7 @@ impl<'cache, 'data> WindowsRecorder<'cache, 'data> {
         let stop_error = None;
 
         Self {
-            allowlist,
+            module_allowlist,
             breakpoints,
             cache,
             deferred_breakpoints,
@@ -60,12 +60,12 @@ impl<'cache, 'data> WindowsRecorder<'cache, 'data> {
         }
     }
 
-    pub fn allowlist(&self) -> &TargetAllowList {
-        &self.allowlist
+    pub fn module_allowlist(&self) -> &AllowList {
+        &self.module_allowlist
     }
 
-    pub fn allowlist_mut(&mut self) -> &mut TargetAllowList {
-        &mut self.allowlist
+    pub fn module_allowlist_mut(&mut self) -> &mut AllowList {
+        &mut self.module_allowlist
     }
 
     fn try_on_create_process(&mut self, dbg: &mut Debugger, module: &ModuleLoadInfo) -> Result<()> {
@@ -132,20 +132,24 @@ impl<'cache, 'data> WindowsRecorder<'cache, 'data> {
             return Ok(());
         }
 
-        let breakpoint = self.breakpoints.remove(id);
+        match self.breakpoints.remove(id) {
+            Some(breakpoint) => {
+                let coverage = self
+                    .coverage
+                    .modules
+                    .get_mut(&breakpoint.module)
+                    .ok_or_else(|| {
+                        anyhow!("coverage not initialized for module: {}", breakpoint.module)
+                    })?;
 
-        let Some(breakpoint) = breakpoint else {
-            let stack = dbg.get_current_stack()?;
-            bail!("stopped on dangling breakpoint, debuggee stack:\n{}", stack);
-        };
-
-        let coverage = self
-            .coverage
-            .modules
-            .get_mut(&breakpoint.module)
-            .ok_or_else(|| anyhow!("coverage not initialized for module: {}", breakpoint.module))?;
-
-        coverage.increment(breakpoint.offset);
+                coverage.increment(breakpoint.offset);
+            }
+            // ASAN can set breakpoints which we don't know about, meaning they're not in `self.breakpoints`
+            None => {
+                let stack = dbg.get_current_stack()?;
+                warn!("stopped on dangling breakpoint, debuggee stack:\n{}", stack);
+            }
+        }
 
         Ok(())
     }
@@ -163,7 +167,7 @@ impl<'cache, 'data> WindowsRecorder<'cache, 'data> {
             return Ok(());
         }
 
-        if !self.allowlist.modules.is_allowed(&path) {
+        if !self.module_allowlist.is_allowed(&path) {
             debug!("not inserting denylisted module: {path}");
             return Ok(());
         }

@@ -156,7 +156,6 @@ module storage 'bicep-templates/storageAccounts.bicep' = {
   params: {
     location: location
     owner: owner
-    signedExpiry: signedExpiry
   }
 }
 
@@ -167,11 +166,11 @@ module autoscaleSettings 'bicep-templates/autoscale-settings.bicep' = {
     server_farm_id: serverFarm.outputs.id
     owner: owner
     workspaceId: operationalInsights.outputs.workspaceId
-    logRetention: log_retention
     autoscale_name: 'onefuzz-autoscale-${uniqueString(resourceGroup().id)}'
     function_diagnostics_settings_name: 'functionDiagnosticSettings'
   }
 }
+
 
 module eventGrid 'bicep-templates/event-grid.bicep' = {
   name: 'event-grid'
@@ -228,8 +227,8 @@ module function 'bicep-templates/function.bicep' = {
   params: {
     name: name
     linux_fx_version: 'DOTNET-ISOLATED|7.0'
-
-    app_logs_sas_url: storage.outputs.FuncSasUrlBlobAppLogs
+    signedExpiry: signedExpiry
+    logs_storage: storage.outputs.FuncName
     app_func_audiences: app_func_audiences
     app_func_issuer: app_func_issuer
     client_id: clientId
@@ -242,6 +241,9 @@ module function 'bicep-templates/function.bicep' = {
     use_windows: true
     enable_remote_debugging: enable_remote_debugging
   }
+  dependsOn:[
+    storage
+  ]
 }
 
 module functionSettings 'bicep-templates/function-settings.bicep' = {
@@ -255,8 +257,9 @@ module functionSettings 'bicep-templates/function-settings.bicep' = {
     app_insights_app_id: operationalInsights.outputs.appInsightsAppId
     app_insights_key: operationalInsights.outputs.appInsightsInstrumentationKey
     client_secret: clientSecret
-    signal_r_connection_string: signalR.outputs.connectionString
-    func_sas_url: storage.outputs.FuncSasUrl
+
+    signalRName: signalR.outputs.signalRName
+    funcStorageName: storage.outputs.FuncName
     func_storage_resource_id: storage.outputs.FuncId
     fuzz_storage_resource_id: storage.outputs.FuzzId
     keyvault_name: keyVaultName
@@ -270,16 +273,18 @@ module functionSettings 'bicep-templates/function-settings.bicep' = {
   }
   dependsOn: [
     function
+    storage
+    signalR
   ]
 }
 
 output fuzz_storage string = storage.outputs.FuzzId
 output fuzz_name string = storage.outputs.FuzzName
-output fuzz_key string = storage.outputs.FuzzKey
+
 
 output func_storage string = storage.outputs.FuncId
 output func_name string = storage.outputs.FuncName
-output func_key string = storage.outputs.FuncKey
+
 
 output scaleset_identity string = scaleset_identity
 output tenant_id string = tenantId

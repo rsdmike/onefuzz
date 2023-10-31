@@ -61,20 +61,21 @@ def main() -> None:
         helper.upload_inputs(args.inputs)
 
     of.containers.files.upload_file(
-        helper.containers[ContainerType.tools], f"{args.tools}/source-coverage.sh"
+        helper.container_name(ContainerType.tools), f"{args.tools}/source-coverage.sh"
     )
 
     containers = [
-        (ContainerType.setup, helper.containers[ContainerType.setup]),
-        (ContainerType.analysis, helper.containers[ContainerType.analysis]),
-        (ContainerType.tools, helper.containers[ContainerType.tools]),
+        (ContainerType.setup, helper.container_name(ContainerType.setup)),
+        (ContainerType.analysis, helper.container_name(ContainerType.analysis)),
+        (ContainerType.tools, helper.container_name(ContainerType.tools)),
         # note, analysis is typically for crashes, but this is analyzing inputs
-        (ContainerType.crashes, helper.containers[ContainerType.inputs]),
+        (ContainerType.crashes, helper.container_name(ContainerType.inputs)),
     ]
 
     of.logger.info("Creating generic_analysis task")
+    job = helper.create_job()
     of.tasks.create(
-        helper.job.job_id,
+        job.job_id,
         TaskType.generic_analysis,
         helper.setup_relative_blob_name(args.target_coverage_exe, args.setup_dir),
         containers,
@@ -84,7 +85,7 @@ def main() -> None:
         analyzer_options=["{target_exe}", "{output_dir}", "{input}"],
     )
 
-    print(f"job:{helper.job.json(indent=4)}")
+    print(f"job:{job.json(indent=4)}")
 
 
 if __name__ == "__main__":

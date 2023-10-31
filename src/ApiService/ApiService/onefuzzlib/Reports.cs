@@ -1,7 +1,10 @@
 ﻿using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.OneFuzz.Service.OneFuzzLib.Orm;
+
+
 namespace Microsoft.OneFuzz.Service;
 
 public interface IReports {
@@ -64,7 +67,6 @@ public class Reports : IReports {
     }
 
     private static T? TryDeserialize<T>(string content) where T : class {
-
         try {
             return JsonSerializer.Deserialize<T>(content, EntityConverter.GetJsonSerializerOptions());
         } catch (JsonException) {
@@ -85,6 +87,7 @@ public class Reports : IReports {
     }
 }
 
+[JsonConverter(typeof(ReportConverter))]
 public interface IReport {
     Uri? ReportUrl {
         init;
@@ -95,3 +98,19 @@ public interface IReport {
         return string.Concat(segments);
     }
 };
+
+public class ReportConverter : JsonConverter<IReport> {
+
+    public override IReport? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) {
+        using var templateJson = JsonDocument.ParseValue(ref reader);
+
+        if (templateJson.RootElement.TryGetProperty("crash_test_result", out _)) {
+            return templateJson.Deserialize<RegressionReport>(options);
+        }
+        return templateJson.Deserialize<Report>(options);
+    }
+
+    public override void Write(Utf8JsonWriter writer, IReport value, JsonSerializerOptions options) {
+        throw new NotImplementedException();
+    }
+}

@@ -5,31 +5,6 @@ use anyhow::Result;
 use regex::{Regex, RegexSet};
 use std::path::Path;
 
-#[derive(Clone, Debug, Default)]
-pub struct TargetAllowList {
-    pub modules: AllowList,
-    pub source_files: AllowList,
-}
-
-impl TargetAllowList {
-    pub fn new(modules: AllowList, source_files: AllowList) -> Self {
-        Self {
-            modules,
-            source_files,
-        }
-    }
-
-    #[allow(clippy::field_reassign_with_default)]
-    pub fn extend(&self, other: &Self) -> Self {
-        let mut new = Self::default();
-
-        new.modules = self.modules.extend(&other.modules);
-        new.source_files = self.source_files.extend(&other.source_files);
-
-        new
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct AllowList {
     allow: RegexSet,
@@ -99,12 +74,13 @@ impl AllowList {
         self.allow.is_match(path) && !self.deny.is_match(path)
     }
 
-    /// Build a new `Allowlist` that adds the allow and deny rules of `other` to `self`.
-    pub fn extend(&self, other: &Self) -> Self {
+    /// Modifies the AllowList by adding the allow and deny rules of `other` to `self`.
+    pub fn extend_in_place(&mut self, other: &Self) {
         let allow = add_regexsets(&self.allow, &other.allow);
         let deny = add_regexsets(&self.deny, &other.deny);
 
-        AllowList::new(allow, deny)
+        self.allow = allow;
+        self.deny = deny;
     }
 }
 
@@ -167,7 +143,12 @@ fn glob_to_regex(expr: &str) -> Result<Regex> {
     let expr = expr.replace(r"\*", ".*");
 
     // Anchor to line start and end.
-    let expr = format!("^{expr}$");
+    // On Windows we should also ignore case.
+    let expr = if cfg!(windows) {
+        format!("(?i)^{expr}$")
+    } else {
+        format!("^{expr}$")
+    };
 
     Ok(Regex::new(&expr)?)
 }

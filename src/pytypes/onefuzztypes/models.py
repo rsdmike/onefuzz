@@ -42,7 +42,7 @@ class UserInfo(BaseModel):
     upn: Optional[str]
 
 
-# Stores the address of a secret
+# Store the address of a secret
 class SecretAddress(BaseModel):
     # keyvault address of a secret
     url: str
@@ -173,6 +173,7 @@ class TaskDetails(BaseModel):
     target_class: Optional[str]
     target_method: Optional[str]
     task_env: Optional[Dict[str, str]]
+    min_available_memory_mb: Optional[int] = Field(ge=0)
 
 
 class TaskPool(BaseModel):
@@ -256,6 +257,7 @@ class CrashTestResult(BaseModel):
 class RegressionReport(BaseModel):
     crash_test_result: CrashTestResult
     original_crash_test_result: Optional[CrashTestResult]
+    report_url: Optional[str]
 
 
 class ADODuplicateTemplate(BaseModel):
@@ -263,6 +265,7 @@ class ADODuplicateTemplate(BaseModel):
     comment: Optional[str]
     set_state: Dict[str, str]
     ado_fields: Dict[str, str]
+    regression_ignore_states: Optional[List[str]]
 
 
 class ADOTemplate(BaseModel):
@@ -273,6 +276,7 @@ class ADOTemplate(BaseModel):
     unique_fields: List[str]
     comment: Optional[str]
     ado_fields: Dict[str, str]
+    ado_duplicate_fields: Optional[Dict[str, str]]
     on_duplicate: ADODuplicateTemplate
 
     # validator needed to convert auth_token to SecretData
@@ -744,6 +748,7 @@ class Task(BaseModel):
     events: Optional[List[TaskEventSummary]]
     nodes: Optional[List[NodeAssignment]]
     user_info: Optional[UserInfo]
+    start_time: Optional[datetime] = None
 
 
 class Job(BaseModel):
@@ -755,6 +760,7 @@ class Job(BaseModel):
     end_time: Optional[datetime] = None
     task_info: Optional[List[Union[Task, JobTaskInfo]]]
     user_info: Optional[UserInfo]
+    start_time: Optional[datetime] = None
 
 
 class NetworkConfig(BaseModel):
@@ -837,10 +843,10 @@ class InstanceConfig(BaseModel):
     )
     extensions: Optional[AzureVmExtensionConfig]
     default_windows_vm_image: str = Field(
-        default="MicrosoftWindowsDesktop:Windows-10:win10-21h2-pro:latest"
+        default="MicrosoftWindowsDesktop:Windows-11:win11-22h2-pro:latest"
     )
     default_linux_vm_image: str = Field(
-        default="Canonical:0001-com-ubuntu-server-focal:20_04-lts:latest"
+        default="Canonical:0001-com-ubuntu-server-jammy:22_04-lts:latest"
     )
     proxy_vm_sku: str = Field(default="Standard_B2s")
     api_access_rules: Optional[Dict[Endpoint, ApiAccessRule]] = None

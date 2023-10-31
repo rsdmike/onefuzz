@@ -28,7 +28,7 @@ impl MicrosoftTelemetryKey {
 }
 
 impl fmt::Display for MicrosoftTelemetryKey {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
 }
@@ -42,7 +42,7 @@ impl InstanceTelemetryKey {
 }
 
 impl fmt::Display for InstanceTelemetryKey {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
 }
@@ -76,11 +76,14 @@ pub enum Event {
     task_start,
     coverage_data,
     coverage_failed,
+    coverage_empty,
     new_result,
+    new_crashdump,
     new_coverage,
     runtime_stats,
     new_report,
     new_unique_report,
+    crash_reported,
     new_unable_to_reproduce,
     regression_report,
     regression_unable_to_reproduce,
@@ -92,11 +95,14 @@ impl Event {
             Self::task_start => "task_start",
             Self::coverage_data => "coverage_data",
             Self::coverage_failed => "coverage_failed",
+            Self::coverage_empty => "coverage_empty",
             Self::new_coverage => "new_coverage",
+            Self::new_crashdump => "new_crashdump",
             Self::new_result => "new_result",
             Self::runtime_stats => "runtime_stats",
             Self::new_report => "new_report",
             Self::new_unique_report => "new_unique_report",
+            Self::crash_reported => "crash_reported",
             Self::new_unable_to_reproduce => "new_unable_to_reproduce",
             Self::regression_report => "regression_report",
             Self::regression_unable_to_reproduce => "regression_unable_to_reproduce",

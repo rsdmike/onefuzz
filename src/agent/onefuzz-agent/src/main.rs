@@ -9,7 +9,6 @@ extern crate downcast_rs;
 extern crate anyhow;
 #[macro_use]
 extern crate onefuzz_telemetry;
-extern crate onefuzz;
 
 use crate::{
     config::StaticConfig, coordinator::StateUpdateEvent, heartbeat::init_agent_heartbeat,
@@ -268,6 +267,7 @@ async fn check_existing_worksets(coordinator: &mut coordinator::Coordinator) -> 
 
         for unit in &work.work_units {
             let event = WorkerEvent::Done {
+                job_id: unit.job_id,
                 task_id: unit.task_id,
                 stdout: "".to_string(),
                 stderr: failure.clone(),

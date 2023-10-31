@@ -19,9 +19,17 @@ from azure.applicationinsights import ApplicationInsightsDataClient
 from azure.applicationinsights.models import QueryBody
 from azure.identity import AzureCliCredential
 from azure.storage.blob import ContainerClient
-from onefuzztypes import models, requests, responses
+from onefuzztypes import models, primitives, requests, responses
 from onefuzztypes.enums import ContainerType, TaskType
-from onefuzztypes.models import BlobRef, Job, NodeAssignment, Report, Task, TaskConfig
+from onefuzztypes.models import (
+    BlobRef,
+    Job,
+    NodeAssignment,
+    RegressionReport,
+    Report,
+    Task,
+    TaskConfig,
+)
 from onefuzztypes.primitives import Container, Directory, PoolName
 from onefuzztypes.responses import TemplateValidationResponse
 
@@ -627,19 +635,25 @@ class DebugLog(Command):
         job_id: Optional[str],
         task_id: Optional[str],
         machine_id: Optional[str],
-        last: Optional[int] = 1,
+        out_dir: Optional[primitives.Directory],
+        last: Optional[int] = None,
         all: bool = False,
     ) -> None:
         """
-        Download the latest agent logs.
+        Download all of the agent logs.
         Make sure you have Storage Blob Data Reader permission.
 
         :param str job_id: Which job you would like the logs for.
         :param str task_id: Which task you would like the logs for.
         :param str machine_id: Which machine you would like the logs for.
-        :param int last: The logs are split in files. Starting with the newest files, how many files you would you like to download.
-        :param bool all: Download all log files.
+        :param str out_dir: The directory where you would like to download the logs.
+        :param int last: (DEPRECATED) This option is a no-op. Now that machines have just one log file, getting the most recent logs implies downloading all of the log files.
+        :param bool all: (DEPRECATED) This option is a no-op. Now that machines have just one log file, getting the most recent logs implies downloading all of the log files.
         """
+
+        # Appease mypy while these options are still part of the API
+        del last
+        del all
 
         from typing import cast
         from urllib import parse
@@ -659,11 +673,14 @@ class DebugLog(Command):
                 f"Job with id {job_id} does not have a logging location configured"
             )
 
+        granularity = "job"
         file_path = None
         if task_id is not None:
+            granularity = "task"
             file_path = f"{task_id}/"
 
             if machine_id is not None:
+                granularity = "machine"
                 file_path += f"{machine_id}/"
 
         container_name = parse.urlsplit(container_url).path[1:]
@@ -699,14 +716,23 @@ class DebugLog(Command):
             self.logger.info("Did not find any matching files to download")
             return None
 
-        if not all:
-            self.logger.info(f"Downloading only the {last} most recent files")
-            files = files[:last]
+        if granularity == "job":
+            self.logger.info(
+                f"Downloading all of the log files for each task associated with the job with id {job_id}"
+            )
+        elif granularity == "task":
+            self.logger.info(
+                f"Downloading the log file for each machine associated with the task with id {task_id}"
+            )
+        else:
+            self.logger.info(
+                f"Downloading the log file for the machine with id {machine_id}"
+            )
 
         for f in files:
             self.logger.info(f"Downloading {f.name}")
 
-            local_path = os.path.join(os.getcwd(), f.name)
+            local_path = os.path.join(out_dir or os.getcwd(), f.name)
             local_directory = os.path.dirname(local_path)
             if not os.path.exists(local_directory):
                 os.makedirs(local_directory)
@@ -818,35 +844,50 @@ class DebugNotification(Command):
         self,
         notificationConfig: models.NotificationConfig,
         task_id: Optional[UUID] = None,
-        report: Optional[Report] = None,
+        report: Optional[str] = None,
     ) -> responses.NotificationTestResponse:
         """Test a notification template"""
 
+        the_report: Union[Report, RegressionReport, None] = None
+
+        if report is not None:
+            try:
+                the_report = RegressionReport.parse_raw(report)
+                print("testing regression report")
+            except Exception:
+                the_report = Report.parse_raw(report)
+                print("testing normal report")
+
         if task_id is not None:
             task = self.onefuzz.tasks.get(task_id)
-            if report is None:
+            if the_report is None:
                 input_blob_ref = BlobRef(
                     account="dummy-storage-account",
                     container="test-notification-crashes",
                     name="fake-crash-sample",
                 )
-                report = self._create_report(
+                the_report = self._create_report(
                     task.job_id, task.task_id, "fake_target.exe", input_blob_ref
                 )
+            elif isinstance(the_report, RegressionReport):
+                if the_report.crash_test_result.crash_report is None:
+                    raise Exception("invalid regression report: no crash report")
+                the_report.crash_test_result.crash_report.task_id = task.task_id
+                the_report.crash_test_result.crash_report.job_id = task.job_id
             else:
-                report.task_id = task.task_id
-                report.job_id = task.job_id
-        elif report is None:
+                the_report.task_id = task.task_id
+                the_report.job_id = task.job_id
+        elif the_report is None:
             raise Exception("must specify either task_id or report")
 
-        report.report_url = "https://dummy-container.blob.core.windows.net/dummy-reports/dummy-report.json"
+        the_report.report_url = "https://dummy-container.blob.core.windows.net/dummy-reports/dummy-report.json"
 
         endpoint = Endpoint(self.onefuzz)
         return endpoint._req_model(
             "POST",
             responses.NotificationTestResponse,
             data=requests.NotificationTest(
-                report=report,
+                report=the_report,
                 notification=models.Notification(
                     container=Container("test-notification-reports"),
                     notification_id=uuid.uuid4(),

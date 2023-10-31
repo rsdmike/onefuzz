@@ -24,6 +24,7 @@ type MappingFn<'a> = Box<dyn Fn(&Expand<'a>) -> Result<ExpandedValue<'a>> + Send
 pub enum PlaceHolder {
     Input,
     Crashes,
+    Crashdumps,
     InputCorpus,
     GeneratedInputs,
     TargetExe,
@@ -59,6 +60,7 @@ impl PlaceHolder {
         match self {
             Self::Input => "{input}",
             Self::Crashes => "{crashes}",
+            Self::Crashdumps => "{crashdumps}",
             Self::InputCorpus => "{input_corpus}",
             Self::GeneratedInputs => "{generated_inputs}",
             Self::TargetExe => "{target_exe}",
@@ -126,7 +128,8 @@ impl<'a> Expand<'a> {
 
     fn input_file_sha256(&self) -> Result<ExpandedValue<'a>> {
         let Some(val) = self.values.get(PlaceHolder::Input.get_string()) else {
-            bail!("no value found for {}, unable to evaluate {}",
+            bail!(
+                "no value found for {}, unable to evaluate {}",
                 PlaceHolder::Input.get_string(),
                 PlaceHolder::InputFileSha256.get_string(),
             )
@@ -147,7 +150,8 @@ impl<'a> Expand<'a> {
 
     fn extract_file_name_no_ext(&self) -> Result<ExpandedValue<'a>> {
         let Some(val) = self.values.get(PlaceHolder::Input.get_string()) else {
-            bail!("no value found for {}, unable to evaluate {}",
+            bail!(
+                "no value found for {}, unable to evaluate {}",
                 PlaceHolder::Input.get_string(),
                 PlaceHolder::InputFileNameNoExt.get_string(),
             )
@@ -171,7 +175,8 @@ impl<'a> Expand<'a> {
 
     fn extract_file_name(&self) -> Result<ExpandedValue<'a>> {
         let Some(val) = self.values.get(PlaceHolder::Input.get_string()) else {
-            bail!("no value found for {}, unable to evaluate {}",
+            bail!(
+                "no value found for {}, unable to evaluate {}",
                 PlaceHolder::Input.get_string(),
                 PlaceHolder::InputFileName.get_string(),
             )
@@ -232,6 +237,12 @@ impl<'a> Expand<'a> {
         let arg = arg.as_ref();
         let path = String::from(arg.to_string_lossy());
         self.set_value(PlaceHolder::Crashes, ExpandedValue::Path(path))
+    }
+
+    pub fn crashdumps(self, arg: impl AsRef<Path>) -> Self {
+        let arg = arg.as_ref();
+        let path = String::from(arg.to_string_lossy());
+        self.set_value(PlaceHolder::Crashdumps, ExpandedValue::Path(path))
     }
 
     pub fn input_path(self, arg: impl AsRef<Path>) -> Self {
@@ -416,7 +427,7 @@ impl<'a> Expand<'a> {
         let arg = arg.as_ref().to_owned();
         let mut errors = Vec::new();
 
-        let result = VAR_RE.replace_all(&arg, |captures: &regex::Captures| -> String {
+        let result = VAR_RE.replace_all(&arg, |captures: &regex::Captures<'_>| -> String {
             let matched = captures.get(0).unwrap().as_str(); // capture 0 must always be present here
             match self.values.get_key_value(matched) {
                 Some((placeholder, ev)) => {

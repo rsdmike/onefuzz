@@ -45,6 +45,7 @@ class AFL(Command):
         supervisor_env: Optional[Dict[str, str]] = None,
         supervisor_input_marker: str = "@@",
         tags: Optional[Dict[str, str]] = None,
+        target_env: Optional[Dict[str, str]] = None,
         wait_for_running: bool = False,
         wait_for_files: Optional[List[ContainerType]] = None,
         afl_container: Optional[Container] = None,
@@ -54,6 +55,7 @@ class AFL(Command):
         debug: Optional[List[TaskDebugFlag]] = None,
         ensemble_sync_delay: Optional[int] = None,
         extra_setup_container: Optional[Container] = None,
+        min_available_memory_mb: Optional[int] = None,
     ) -> Optional[Job]:
         """
         Basic AFL job
@@ -97,7 +99,7 @@ class AFL(Command):
 
         if existing_inputs:
             self.onefuzz.containers.get(existing_inputs)
-            helper.containers[ContainerType.inputs] = existing_inputs
+            helper.add_existing_container(ContainerType.inputs, existing_inputs)
         else:
             helper.define_containers(ContainerType.inputs)
 
@@ -111,7 +113,7 @@ class AFL(Command):
         if (
             len(
                 self.onefuzz.containers.files.list(
-                    helper.containers[ContainerType.inputs]
+                    helper.containers[ContainerType.inputs].name
                 ).files
             )
             == 0
@@ -130,22 +132,23 @@ class AFL(Command):
 
         containers = [
             (ContainerType.tools, afl_container),
-            (ContainerType.setup, helper.containers[ContainerType.setup]),
-            (ContainerType.crashes, helper.containers[ContainerType.crashes]),
-            (ContainerType.inputs, helper.containers[ContainerType.inputs]),
+            (ContainerType.setup, helper.container_name(ContainerType.setup)),
+            (ContainerType.crashes, helper.container_name(ContainerType.crashes)),
+            (ContainerType.inputs, helper.container_name(ContainerType.inputs)),
         ]
 
         if extra_setup_container is not None:
             containers.append(
                 (
                     ContainerType.extra_setup,
-                    helper.containers[ContainerType.extra_setup],
+                    extra_setup_container,
                 )
             )
 
         self.logger.info("creating afl fuzz task")
+        job = helper.create_job()
         fuzzer_task = self.onefuzz.tasks.create(
-            helper.job.job_id,
+            job.job_id,
             TaskType.generic_supervisor,
             target_exe_blob_name,
             containers,
@@ -162,17 +165,19 @@ class AFL(Command):
             stats_format=StatsFormat.AFL,
             task_wait_for_files=ContainerType.inputs,
             tags=helper.tags,
+            target_env=target_env,
             debug=debug,
             ensemble_sync_delay=ensemble_sync_delay,
+            min_available_memory_mb=min_available_memory_mb,
         )
 
         report_containers = [
-            (ContainerType.setup, helper.containers[ContainerType.setup]),
-            (ContainerType.crashes, helper.containers[ContainerType.crashes]),
-            (ContainerType.reports, helper.containers[ContainerType.reports]),
+            (ContainerType.setup, helper.container_name(ContainerType.setup)),
+            (ContainerType.crashes, helper.container_name(ContainerType.crashes)),
+            (ContainerType.reports, helper.container_name(ContainerType.reports)),
             (
                 ContainerType.unique_reports,
-                helper.containers[ContainerType.unique_reports],
+                helper.container_name(ContainerType.unique_reports),
             ),
         ]
 
@@ -180,13 +185,13 @@ class AFL(Command):
             report_containers.append(
                 (
                     ContainerType.extra_setup,
-                    helper.containers[ContainerType.extra_setup],
+                    helper.container_name(ContainerType.extra_setup),
                 )
             )
 
         self.logger.info("creating generic_crash_report task")
         self.onefuzz.tasks.create(
-            helper.job.job_id,
+            job.job_id,
             TaskType.generic_crash_report,
             target_exe_blob_name,
             report_containers,
@@ -202,5 +207,5 @@ class AFL(Command):
         )
 
         self.logger.info("done creating tasks")
-        helper.wait()
-        return helper.job
+        helper.wait(job)
+        return job

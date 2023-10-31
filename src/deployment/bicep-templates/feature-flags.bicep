@@ -83,6 +83,32 @@ resource enableWorkItemCreation 'Microsoft.AppConfiguration/configurationStores/
     value: string({
       id: 'EnableWorkItemCreation'
       description: 'Create work items'
+      enabled: true
+    })
+    contentType: 'application/vnd.microsoft.appconfig.ff+json;charset=utf-8'
+  }
+}
+
+resource enableContainerRetentionPolicies 'Microsoft.AppConfiguration/configurationStores/keyValues@2021-10-01-preview' = {
+  parent: featureFlags
+  name: '.appconfig.featureflag~2FEnableContainerRetentionPolicies'
+  properties: {
+    value: string({
+      id: 'EnableContainerRetentionPolicies'
+      description: 'Enable retention policies on containers'
+      enabled: true
+    })
+    contentType: 'application/vnd.microsoft.appconfig.ff+json;charset=utf-8'
+  }
+}
+
+resource enableSlimEventSerialization 'Microsoft.AppConfiguration/configurationStores/keyValues@2021-10-01-preview' = {
+  parent: featureFlags
+  name: '.appconfig.featureflag~2FEnableSlimEventSerialization'
+  properties: {
+    value: string({
+      id: 'EnableSlimEventSerialization'
+      description: 'Enable serializing events as smaller payloads'
       enabled: false
     })
     contentType: 'application/vnd.microsoft.appconfig.ff+json;charset=utf-8'
